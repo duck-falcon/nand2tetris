@@ -32,5 +32,36 @@ CHIP CPU {
         pc[15];          // address of next instruction
 
     PARTS:
-	//// Replace this comment with your code.
+    // ALU
+	Mux16(a=aregister, b=inM, sel=instruction[12], out=regiinM);          // Aレジスタ or inM → ALUのy
+    ALU(x=dregister, y=regiinM, zx=instruction[11], nx=instruction[10], zy=instruction[9], 
+    ny=instruction[8], f=instruction[7], no=instruction[6], out=outM, out=outalu, zr=outzr, ng=outng);  // out = 0 -> zr = 1, out < 0 => ng = 1 
+
+    // Write A Register
+    Mux16(a=instruction, b=outalu, sel=instruction[15], out=instalu);          // instruction or ALU出力 → Aレジスタ, 最上位ビットが0なら instructionを突っ込む
+    Not(in=instruction[15],out=notAcommand); // A命令なら 1
+    Or(a=notAcommand,b=instruction[5],out=ld); // A命令 or C命令のAレジスタへの書き込みフラグ=1   
+    ARegister(in=instalu, load=ld, out=aregister,out[0..14]=addressM);
+
+    // Write D Register
+    And(a=instruction[4],b=instruction[15],out=dwriteflg);  // C命令かどうかの判定
+    DRegister(in=outalu, load=dwriteflg, out=dregister);
+
+    // ProgramCounter
+    PC(in=aregister,inc=true,load=jmprealflg,reset=reset,out[0..14]=pc); // ROM32K に渡すのはPCの下位15bit
+
+    // jump
+    And(a=instruction[2],b=outng,out=ngflg); // ALU 出力の負ジャンプ判定。ngflg=1ならジャンプする
+    And(a=instruction[1],b=outzr,out=zrflg); // ALU 出力の0ジャンプ判定。ngflg=1ならジャンプ
+    Not(in=outng,out=outnotng); // ALUの出力が正か0
+    Not(in=outzr,out=outnotzr); // ALUの出力が0ではない
+    And(a=outnotng,b=outnotzr,out=outps); // ALU の出力が正
+    And(a=instruction[0],b=outps,out=psflg); // ALU 出力の正ジャンプ判定。psflg=1ならジャンプ
+    Or(a=ngflg,b=zrflg,out=tmpflg);
+    Or(a=tmpflg,b=psflg,out=jmpflg); // ジャンプフラグ
+    And(a=instruction[15],b=jmpflg,out=jmprealflg); // C命令かどうかの判定
+
+    // writeM 判定
+    And(a=instruction[3], b=instruction[15], out=writeM);
+    
 }

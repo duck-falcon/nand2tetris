@@ -25,5 +25,13 @@ CHIP Memory {
     OUT out[16];
 
     PARTS:
-	//// Replace this comment with your code.
+    DMux4Way(in=load,sel=address[13..14],a=la,b=lb,c=lc,d=ld); // メモリを更新するならば、どのメモリが更新されるか
+    Or(a=la,b=lb,out=l); // 00 or 01 なら RAM16K 指定
+	RAM16K(in=in,load=l,address=address[0..13],out=oa); // 0x0000〜0x3FFF, 14bit
+    Screen(in=in,load=lc,address=address[0..12],out=oc); // 0x4000〜0x5FFF 外部との接続を持ったメモリマップ。スクリーンとの接続については気にしないこととし、外部から与えられる想定, 13bit
+    Keyboard(out=keyboard); // 0x6000 同上, 1bit。読み出し専用。
+
+    Mux4Way16(a=oa,b=oa,c=oc,d=keyboard,sel=address[13..14],out=out); // メモリから読み出す
+    // 普通に RAM16K に Screen と Keyboard をつけて拡張しただけ。上位2bit で RAM16K,Screen,Keyboard にそれぞれ振り分ければ良い。
+    // 000 ~ 011 -> RAM16K, 100 ~ 101 -> Screen, 111 -> Keyboard。上から 15,14,13bit 。 15,14 が 00,01 -> RAM16K, 10 -> Screen, 11 -> Keyboard
 }
