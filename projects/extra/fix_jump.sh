@@ -19,7 +19,9 @@ while IFS= read -r line; do
     # この行に★定義があるか
     # 定義: コメント部分で (★N) の括弧なしで出てくるもの（参照は必ず (★N) の形式）
     COMMENT="${line#*//}"
-    if [[ "$COMMENT" =~ [^\(]★([0-9]+)[[:space:]] ]] || [[ "$COMMENT" =~ ^★([0-9]+)[[:space:]] ]]; then
+    # 定義: コメントの先頭（空白除く）が ★N で始まるもの
+    TRIMMED="${COMMENT#"${COMMENT%%[![:space:]]*}"}"
+    if [[ "$TRIMMED" =~ ^★([0-9]+) ]]; then
       STAR_ID="${BASH_REMATCH[1]}"
       STAR_ADDR[$STAR_ID]=$LINE_NUM
     fi
