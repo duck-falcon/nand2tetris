@@ -12,8 +12,10 @@ SEG_SYMBOL = {
 class CodeWriter:
     def __init__(self, path: str) -> None:
         self._file = open(path, "w")
-        self._filename = ""   # static セグメント用
-        self._label_cnt = 0   # eq/gt/lt のユニークラベル用
+        self._filename = ""          # static セグメント用
+        self._label_cnt = 0          # eq/gt/lt のユニークラベル用
+        self._call_cnt = 0           # call のリターンアドレスラベル用
+        self._current_function = ""  # 現在処理中の関数名（label スコープ用）
 
     def set_filename(self, filename: str) -> None:
         """static 変数のプレフィックスに使うファイル名（拡張子なし）を設定する。"""
@@ -146,6 +148,94 @@ class CodeWriter:
             return self._pop_d() + [f"@{self._filename}.{index}", "M=D"]
 
         raise ValueError(f"Unknown segment: {segment}")
+
+    # ── プログラムフロー命令 ─────────────────────────────────
+
+    def _scoped_label(self, label: str) -> str:
+        """現在の関数スコープを付けたラベルを返す。"""
+        if self._current_function:
+            return f"{self._current_function}${label}"
+        return label
+
+    def write_label(self, label: str) -> None:
+        self._write([f"// label {label}", f"({self._scoped_label(label)})"])
+
+    def write_goto(self, label: str) -> None:
+        self._write([f"// goto {label}", f"@{self._scoped_label(label)}", "0;JMP"])
+
+    def write_if_goto(self, label: str) -> None:
+        # スタックのトップをポップして、0 でなければジャンプ
+        self._write([f"// if-goto {label}"] + self._pop_d() + [f"@{self._scoped_label(label)}", "D;JNE"])
+
+    # ── 関数命令 ─────────────────────────────────────────────
+
+    # function の変換。実質初期化。
+    def write_function(self, name: str, n_locals: int) -> None:
+        self._current_function = name
+        lines: list[str] = [f"// function {name} {n_locals}", f"({name})"]
+        # ローカル変数を 0 で初期化
+        for _ in range(n_locals):
+            lines += ["D=0"] + self._push_d()
+        self._write(lines)
+
+    def write_call(self, name: str, n_args: int) -> None:
+        # リターンアドレスラベルを生成
+        prefix = self._current_function if self._current_function else "bootstrap"
+        ret_label = f"{prefix}$ret.{self._call_cnt}"
+        self._call_cnt += 1
+
+        lines: list[str] = [f"// call {name} {n_args}"]
+
+        # リターンアドレスをプッシュ
+        lines += [f"@{ret_label}", "D=A"] + self._push_d()
+        # 呼び出し元のフレームポインタをプッシュ
+        lines += ["@LCL",  "D=M"] + self._push_d()
+        lines += ["@ARG",  "D=M"] + self._push_d()
+        lines += ["@THIS", "D=M"] + self._push_d()
+        lines += ["@THAT", "D=M"] + self._push_d()
+
+        # ARG = SP - 5 - nArgs
+        lines += [
+            "@SP", "D=M",
+            f"@{5 + n_args}", "D=D-A",
+            "@ARG", "M=D",
+        ]
+        # LCL = SP
+        lines += ["@SP", "D=M", "@LCL", "M=D"]
+        # 関数へジャンプ
+        lines += [f"@{name}", "0;JMP"]
+        # リターンアドレスラベルを配置
+        lines += [f"({ret_label})"]
+
+        self._write(lines)
+
+    def write_return(self) -> None:
+        lines: list[str] = ["// return"]
+
+        # R14 = LCL
+        lines += ["@LCL", "D=M", "@R14", "M=D"]
+        # R15 = RET = *(LCL-5)（RET をR15に待避）
+        lines += ["@5", "A=D-A", "D=M", "@R15", "M=D"]
+        # *ARG = pop()（戻り値を呼び出し元の arg 0 の位置に配置、ここが天辺となる）
+        lines += self._pop_d() + ["@ARG", "A=M", "M=D"]
+        # SP = ARG + 1（呼び出し元の SP を復元、上記の天辺が確定）
+        lines += ["@ARG", "D=M+1", "@SP", "M=D"]
+        # THAT/THIS/ARG/LCL を順に復元する。（R14 を LCL-1, -2, -3, -4 と順次デクリメント）
+        lines += ["@R14", "AM=M-1", "D=M", "@THAT", "M=D"]
+        lines += ["@R14", "AM=M-1", "D=M", "@THIS", "M=D"]
+        lines += ["@R14", "AM=M-1", "D=M", "@ARG",  "M=D"]
+        lines += ["@R14", "AM=M-1", "D=M", "@LCL",  "M=D"]
+        # リターンアドレスへジャンプ
+        lines += ["@R15", "A=M", "0;JMP"]
+
+        self._write(lines)
+
+    # ── ブートストラップ ─────────────────────────────────────
+
+    def write_init(self) -> None:
+        """SP=256 に初期化して Sys.init を呼び出すブートストラップコードを出力する。"""
+        self._write(["// bootstrap", "@256", "D=A", "@SP", "M=D"])
+        self.write_call("Sys.init", 0)
 
     # ── 出力 ─────────────────────────────────────────────────
 

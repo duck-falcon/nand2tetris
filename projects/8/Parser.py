@@ -1,5 +1,16 @@
 """VM Parser — .vm ファイルの1行を解析する。"""
 
+_COMMAND_TYPES = {
+    "push":     "C_PUSH",
+    "pop":      "C_POP",
+    "label":    "C_LABEL",
+    "goto":     "C_GOTO",
+    "if-goto":  "C_IF",
+    "function": "C_FUNCTION",
+    "call":     "C_CALL",
+    "return":   "C_RETURN",
+}
+
 
 class Parser:
     def __init__(self, path: str) -> None:
@@ -23,19 +34,15 @@ class Parser:
 
     def command_type(self) -> str:
         first = self._current.split()[0]
-        if first == "push":
-            return "C_PUSH"
-        if first == "pop":
-            return "C_POP"
-        return "C_ARITHMETIC"
+        return _COMMAND_TYPES.get(first, "C_ARITHMETIC")
 
     def arg1(self) -> str:
-        """算術命令ならコマンド自身、push/pop ならセグメント名を返す。"""
+        """算術命令ならコマンド自身、それ以外なら第1引数（ラベル名 or セグメント名）を返す。"""
         parts = self._current.split()
         if self.command_type() == "C_ARITHMETIC":
             return parts[0]
         return parts[1]
 
     def arg2(self) -> int:
-        """push/pop のインデックスを返す。"""
+        """push/pop/function/call の第2引数（インデックス or 個数）を返す。"""
         return int(self._current.split()[2])
